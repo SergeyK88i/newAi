@@ -1,47 +1,5 @@
 import numpy as np
-from sentence_transformers import SentenceTransformer
-import faiss
-from typing import List, Tuple
 
-# Импортируем ранее созданный класс GigaChatAPI
-from GigaClass import GigaChatAPI
-
-class TextRetriever:
-    def __init__(self, model_name: str = 'distiluse-base-multilingual-cased-v1'):
-        self.model = SentenceTransformer(model_name)
-        self.index = None
-        self.texts = []
-
-    def create_embeddings(self, file_path: str, chunk_size: int = 500):
-        """Создает эмбеддинги из текстового файла"""
-        with open(file_path, 'r', encoding='utf-8') as file:
-            text = file.read()
-        
-        # Разбиваем текст на чанки
-        self.texts = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-        
-        # Создаем эмбеддинги
-        embeddings = self.model.encode(self.texts)
-        
-        # Создаем FAISS индекс
-        self.index = faiss.IndexFlatL2(embeddings.shape[1])
-        self.index.add(embeddings.astype('float32'))
-
-    # В методе retrieve добавить проверку
-
-    def retrieve(self, query: str, k: int = 3) -> List[Tuple[str, float]]:
-        """Ищет k наиболее релевантных фрагментов для запроса"""
-        query_vector = self.model.encode([query])
-        distances, indices = self.index.search(query_vector.astype('float32'), k)
-        
-        # Уменьшаем порог релевантности для более строгой фильтрации
-        RELEVANCE_THRESHOLD = 1.1
-        results = []
-        for i, idx in enumerate(indices[0]):
-            if distances[0][i] < RELEVANCE_THRESHOLD:  # Проверяем релевантность
-                results.append((self.texts[idx], distances[0][i]))
-        
-        return results
 
 
 # Пример использования
@@ -61,8 +19,18 @@ if __name__ == "__main__":
     if response and response.status_code == 200:
         print("Токен успешно получен")
 
-        # Пример запроса
-        query = "что такое javascript?"
+        while True:
+            query = input("Введите ваш вопрос (или 'exit' для выхода, 'clear' для очистки истории): ")
+            
+            if query.lower() == 'exit':
+                break
+            elif query.lower() == 'clear':
+                giga_chat.clear_history()
+                print("История диалога очищена")
+                continue
+
+            # Пример запроса
+            # query = "что такое javascript?"
 
 
         relevant_chunks = retriever.retrieve(query)
