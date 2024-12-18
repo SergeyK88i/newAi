@@ -1,6 +1,7 @@
 from sentence_transformers import SentenceTransformer
 import faiss
 from typing import List, Tuple
+import re
 
 # Импортируем ранее созданный класс GigaChatAPI
 from GigaClass import GigaChatAPI
@@ -9,9 +10,32 @@ class TextRetriever:
         self.model = SentenceTransformer(model_name)
         self.index = None
         self.texts = []
+        self.chunks_metadata = []  # Добавляем хранение метаданных
 
-    def create_embeddings(self, file_path: str, chunk_size: int = 50):
-        """Создает эмбеддинги с учетом заголовков"""
+    def semantic_chunk(self, text: str) -> List[str]:
+        """Семантическая разбивка текста по заголовкам"""
+        chunks = re.split(r'(?=# )', text)
+        return [chunk.strip() for chunk in chunks if chunk.strip()]
+
+    def extract_keywords(self, text: str) -> List[str]:
+        """Извлечение ключевых слов из заголовков"""
+        header_match = re.search(r'#\s*([\w\s-]+)', text)
+        if header_match:
+            # Извлекаем слова из заголовка и очищаем их
+            words = header_match.group(1).split()
+            # Обрабатываем аббревиатуры и специальные термины
+            keywords = []
+            for word in words:
+                # Сохраняем аббревиатуры в верхнем регистре
+                if word.isupper():
+                    keywords.append(word)
+                else:
+                    keywords.append(word.lower())
+            return keywords
+        return []
+
+    def create_embeddings(self, file_path: str):
+        """Улучшенное создание эмбеддингов с метаданными"""
         with open(file_path, 'r', encoding='utf-8') as file:
             text = file.read()
 
@@ -19,70 +43,55 @@ class TextRetriever:
         if not text:
             raise ValueError("Файл пустой или не содержит текста")
 
-        # Разбиваем текст на секции по заголовкам
-        sections = []
-        current_header = ""
-        current_content = []
-    
-        for line in text.split('\n'):
-            # Определяем заголовки (например, по # или по другим признакам)
-            if line.startswith('#') or line.isupper():
-                if current_header and current_content:
-                    section_text = f"{current_header}\n{''.join(current_content)}"
-                    sections.append(section_text)
-                current_header = line
-                current_content = []
-            else:
-                current_content.append(line + '\n')
-    
-        # Добавляем последнюю секцию
-        if current_header and current_content:
-            section_text = f"{current_header}\n{''.join(current_content)}"
-            sections.append(section_text)
+        # Разбиваем на семантические чанки
+        chunks = self.semantic_chunk(text)
+        self.texts = chunks
 
-        # Проверяем наличие секций
-        if not sections:
-            raise ValueError("Не удалось выделить секции из текста")
-
-        # Разбиваем каждую секцию на чанки с сохранением заголовка
-        self.texts = []
-        for section in sections:
-            header = section.split('\n')[0]
-            content = section[len(header):]
-            # Разбиваем контент на чанки, добавляя заголовок к каждому
-            for i in range(0, len(content), chunk_size):
-                chunk = content[i:i+chunk_size]
-                self.texts.append(f"{header}\n{chunk}")
-    
-        # Проверяем наличие текстов для эмбеддингов
-        if not self.texts:
-            raise ValueError("Не удалось создать текстовые фрагменты")
+         # Создаём расширенные метаданные для каждого чанка
+        self.chunks_metadata = []
+        for chunk in chunks:
+            metadata = {
+                'content': chunk,
+                'keywords': self.extract_keywords(chunk),
+                'title': chunk.split('\n')[0] if chunk else '',
+                'is_definition': bool(re.search(r'это|является|представляет собой', chunk.lower()))
+            }
+            self.chunks_metadata.append(metadata)
 
         # Создаем эмбеддинги
         embeddings = self.model.encode(self.texts)
 
-        # Проверяем размерность эмбеддингов
         if embeddings.shape[0] == 0:
             raise ValueError("Не удалось создать эмбеддинги")
 
-        # Создаем FAISS индекс
-        self.index = faiss.IndexFlatL2(embeddings.shape[1])
-        self.index.add(embeddings.astype('float32'))
+        # Создаем и наполняем FAISS индекс
+        dimension = embeddings.shape[1]  # Получаем размерность эмбеддингов
+        self.index = faiss.IndexFlatL2(dimension)  # Создаем индекс
+        self.index.add(embeddings.astype('float32')) 
+        
 
     # В методе retrieve добавить проверку
     def retrieve(self, query: str, k: int = 3) -> List[Tuple[str, float]]:
-        """Ищет k наиболее релевантных фрагментов для запроса"""
+        """Улучшенный поиск с учётом метаданных"""
         if not self.index or not self.texts:
             return []
-        query_vector = self.model.encode([query])
+
+        # Очищаем запрос от стоп-слов
+        stop_words = {'что', 'такое', 'это', 'как', 'где', 'когда'}
+        clean_query = ' '.join([word for word in query.lower().split() if word not in stop_words])
+        
+        query_vector = self.model.encode([clean_query])
         distances, indices = self.index.search(query_vector.astype('float32'), k)
         
-        # Уменьшаем порог релевантности для более строгой фильтрации
         RELEVANCE_THRESHOLD = 2.5
         results = []
+        
         if len(indices) > 0 and len(indices[0]) > 0:
             for i, idx in enumerate(indices[0]):
-                if distances[0][i] < RELEVANCE_THRESHOLD:  # Проверяем релевантность
-                    results.append((self.texts[idx], distances[0][i]))
+                if distances[0][i] < RELEVANCE_THRESHOLD:
+                    # Добавляем проверку на ключевые слова
+                    chunk_metadata = self.chunks_metadata[idx]
+                    if any(keyword.lower() in clean_query for keyword in chunk_metadata['keywords']):
+                        results.append((self.texts[idx], distances[0][i]))
         
         return results

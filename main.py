@@ -5,7 +5,7 @@ def main():
     auth_token = 'MmMzZDA5OGMtODIyNS00MGJlLWJhOGItMzRhOTgyY2M0YjBhOjk3NGQ0ZTA3LWQ3MDUtNDhhNC1iYjFlLTQ0N2Y2ZmJkMWM4Mg=='
 
     # Создаем экземпляр агента
-    agent = DocumentationAgent(file_path=file_path, auth_token=auth_token)
+    agent = DocumentationAgent(file_path, auth_token)
     
     print("Добро пожаловать в систему консультации по документации!")
     print("Для выхода введите 'exit', для очистки истории введите 'clear'")
@@ -30,7 +30,15 @@ def main():
             agent.clear_conversation()
             print("История диалога очищена")
             continue
-            
+        
+        # Получаем релевантные чанки перед генерацией ответа
+        relevant_chunks = agent.retriever.retrieve(query)
+        print("\nНайденные релевантные фрагменты:")
+        for chunk, score in relevant_chunks:
+            print(f"\nРелевантность: {score:.4f}")
+            print(f"Текст: {chunk}\n")
+            print("-" * 50)
+
         response = agent.ask(query)
         # Сохраняем вопрос и ответ в историю
         conversation_history.append((query, response))
