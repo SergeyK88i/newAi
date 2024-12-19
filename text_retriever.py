@@ -3,95 +3,100 @@ import faiss
 from typing import List, Tuple
 import re
 
-# Импортируем ранее созданный класс GigaChatAPI
-from GigaClass import GigaChatAPI
 class TextRetriever:
     def __init__(self, model_name: str = 'distiluse-base-multilingual-cased-v1'):
         self.model = SentenceTransformer(model_name)
         self.index = None
         self.texts = []
-        self.chunks_metadata = []  # Добавляем хранение метаданных
+        self.chunks_metadata = []
 
     def semantic_chunk(self, text: str) -> List[str]:
-        """Семантическая разбивка текста по заголовкам"""
-        chunks = re.split(r'(?=# )', text)
+        """Семантическая разбивка текста с учетом связанных частей"""
+        chunks = []
+        current_chunk = []
+        
+        lines = text.split('\n')
+        for line in lines:
+            if line.startswith('# '):
+                if current_chunk:
+                    chunks.append('\n'.join(current_chunk))
+                    current_chunk = []
+            current_chunk.append(line)
+        
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+        
         return [chunk.strip() for chunk in chunks if chunk.strip()]
 
-    def extract_keywords(self, text: str) -> List[str]:
-        """Извлечение ключевых слов из заголовков"""
+    def extract_metadata(self, text: str) -> dict:
+        """Извлечение расширенных метаданных из текста"""
+        metadata = {
+            'content': text,
+            'title': text.split('\n')[0] if text else '',
+            'terms': self._extract_terms(text),
+            'concepts': self._extract_concepts(text)
+        }
+        return metadata
+
+    def _extract_terms(self, text: str) -> List[str]:
+        """Извлечение терминов и их вариаций"""
+        terms = []
+        # Ищем термины в скобках (часто содержат синонимы)
+        bracket_terms = re.findall(r'\((.*?)\)', text)
+        for term in bracket_terms:
+            terms.extend(term.split(','))
+        # Добавляем основные термины из заголовка
         header_match = re.search(r'#\s*([\w\s-]+)', text)
         if header_match:
-            # Извлекаем слова из заголовка и очищаем их
-            words = header_match.group(1).split()
-            # Обрабатываем аббревиатуры и специальные термины
-            keywords = []
-            for word in words:
-                # Сохраняем аббревиатуры в верхнем регистре
-                if word.isupper():
-                    keywords.append(word)
-                else:
-                    keywords.append(word.lower())
-            return keywords
-        return []
+            terms.extend(header_match.group(1).split())
+        return [term.strip().lower() for term in terms if term.strip()]
+
+    def _extract_concepts(self, text: str) -> List[str]:
+        """Извлечение ключевых концепций из текста"""
+        # Ищем определения после тире или двоеточия
+        concepts = re.findall(r'[—:]\s*(.*?)(?=\n|$)', text)
+        return [concept.strip() for concept in concepts if concept.strip()]
 
     def create_embeddings(self, file_path: str):
-        """Улучшенное создание эмбеддингов с метаданными"""
+        """Создание векторных представлений текста"""
         with open(file_path, 'r', encoding='utf-8') as file:
             text = file.read()
 
-        # Проверяем, что текст не пустой
         if not text:
             raise ValueError("Файл пустой или не содержит текста")
 
-        # Разбиваем на семантические чанки
         chunks = self.semantic_chunk(text)
         self.texts = chunks
 
-         # Создаём расширенные метаданные для каждого чанка
-        self.chunks_metadata = []
-        for chunk in chunks:
-            metadata = {
-                'content': chunk,
-                'keywords': self.extract_keywords(chunk),
-                'title': chunk.split('\n')[0] if chunk else '',
-                'is_definition': bool(re.search(r'это|является|представляет собой', chunk.lower()))
-            }
-            self.chunks_metadata.append(metadata)
+        # Создаём расширенные метаданные
+        self.chunks_metadata = [self.extract_metadata(chunk) for chunk in chunks]
 
-        # Создаем эмбеддинги
-        embeddings = self.model.encode(self.texts)
-
-        if embeddings.shape[0] == 0:
+        # Создаем эмбеддинги для текстов и концепций
+        text_embeddings = self.model.encode([chunk['content'] for chunk in self.chunks_metadata])
+        
+        if text_embeddings.shape[0] == 0:
             raise ValueError("Не удалось создать эмбеддинги")
 
-        # Создаем и наполняем FAISS индекс
-        dimension = embeddings.shape[1]  # Получаем размерность эмбеддингов
-        self.index = faiss.IndexFlatL2(dimension)  # Создаем индекс
-        self.index.add(embeddings.astype('float32')) 
-        
+        dimension = text_embeddings.shape[1]
+        self.index = faiss.IndexFlatL2(dimension)
+        self.index.add(text_embeddings.astype('float32'))
 
-    # В методе retrieve добавить проверку
-    def retrieve(self, query: str, k: int = 3) -> List[Tuple[str, float]]:
-        """Улучшенный поиск с учётом метаданных"""
+    def retrieve(self, query: str, k: int = 5) -> List[Tuple[str, float]]:
+        """Семантический поиск по смыслу"""
         if not self.index or not self.texts:
             return []
 
-        # Очищаем запрос от стоп-слов
-        stop_words = {'что', 'такое', 'это', 'как', 'где', 'когда'}
-        clean_query = ' '.join([word for word in query.lower().split() if word not in stop_words])
+        # Векторное представление запроса
+        query_vector = self.model.encode([query])
         
-        query_vector = self.model.encode([clean_query])
+        # Поиск ближайших векторов
         distances, indices = self.index.search(query_vector.astype('float32'), k)
         
-        RELEVANCE_THRESHOLD = 2.5
+        # Формируем результаты с учетом семантической близости
         results = []
+        for i, idx in enumerate(indices[0]):
+            # Нормализуем score для лучшей интерпретации
+            semantic_score = 1 / (1 + distances[0][i])
+            results.append((self.texts[idx], semantic_score))
         
-        if len(indices) > 0 and len(indices[0]) > 0:
-            for i, idx in enumerate(indices[0]):
-                if distances[0][i] < RELEVANCE_THRESHOLD:
-                    # Добавляем проверку на ключевые слова
-                    chunk_metadata = self.chunks_metadata[idx]
-                    if any(keyword.lower() in clean_query for keyword in chunk_metadata['keywords']):
-                        results.append((self.texts[idx], distances[0][i]))
-        
-        return results
+        return sorted(results, key=lambda x: x[1], reverse=True)
