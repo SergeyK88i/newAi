@@ -1,10 +1,13 @@
 from text_retriever import TextRetriever
 from GigaClass import GigaChatAPI
+from features import QuestionMatcher, ContextExpander
 
 class DocumentationAgent:    
     def __init__(self, file_path: str, auth_token: str):
         self.retriever = TextRetriever()
         self.retriever.create_embeddings(file_path)
+        self.question_matcher = QuestionMatcher(model=self.retriever.model)
+        self.context_expander = ContextExpander(self.retriever)
         self.giga_chat = GigaChatAPI()
         response = self.giga_chat.get_token(auth_token)
         if not response or response.status_code != 200:
@@ -46,9 +49,10 @@ class DocumentationAgent:
         """Валидация ответа на соответствие контексту"""
         if not response:
             return "Не удалось получить ответ из документации"
-        
-        # if not any(chunk in response for chunk in context.split('\n')):
-        #     return "Информация отсутствует в документации"
+
+        #Строгое сравнение?
+        if not any(chunk in response for chunk in context.split('\n')):
+            return "Информация отсутствует в документации"
             
         if not response.startswith("Согласно документации:"):
             response = "Согласно документации: " + response
@@ -60,17 +64,24 @@ class DocumentationAgent:
         if query.lower() == 'clear':
             return self.clear_conversation()
 
+        # Сначала ищем похожие вопросы
+        similar_questions = self.question_matcher.find_similar(query)
+        if similar_questions:
+            best_match = similar_questions[0]
+            if best_match['similarity'] > 0.9:
+                return f"Найден похожий вопрос:\nВопрос: {best_match['question']}\nОтвет: {best_match['answer']}"
+
         # Определяем тип запроса
         query_type = self._get_query_type(query)
         
         # Получаем релевантные чанки
         relevant_chunks = self.retriever.retrieve(query, k=max_chunks)
-
         if not relevant_chunks:
             return "В предоставленной документации нет информации по этому вопросу."
 
-        # Формируем контекст
-        context = "\n".join([chunk for chunk, _ in relevant_chunks])
+        # Расширяем контекст
+        expanded_context = self.context_expander.expand_context(relevant_chunks, query)
+        context = "\n".join(expanded_context)
         
         # Получаем специализированный промпт
         system_message = self._get_system_prompt(query_type)
@@ -83,9 +94,19 @@ class DocumentationAgent:
 
         if chat_response and chat_response.status_code == 200:
             response = chat_response.json()['choices'][0]['message']['content']
-            return self.validate_response(response, context)
-        else:
-            return "Извините, не удалось получить ответ. Попробуйте переформулировать вопрос."
+
+            # Добавляем логирование
+            print("\nОтвет от GigaChat до валидации:")
+            print("-" * 50)
+            print(response)
+            print("-" * 50)
+
+            validated_response = self.validate_response(response, context)
+            # Сохраняем вопрос и ответ для будущего использования
+            self.question_matcher.add_question(query, validated_response)
+            return validated_response
+        
+        return "Не удалось получить ответ. Попробуйте переформулировать вопрос."
 
     def clear_conversation(self):
         """Очистка истории диалога"""
