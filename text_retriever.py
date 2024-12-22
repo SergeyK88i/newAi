@@ -14,18 +14,34 @@ class TextRetriever:
         """Семантическая разбивка текста с учетом связанных частей"""
         chunks = []
         current_chunk = []
+        code_block = False
         
         lines = text.split('\n')
         for line in lines:
-            if line.startswith('# '):
+            # Определяем начало/конец блока кода
+            if line.strip().startswith('```'):
+                code_block = not code_block
+
+            # Новый чанк начинается при:
+            if (line.startswith('# ') or  # Заголовок
+                line.startswith('1. ') or  # Нумерованный список
+                line.startswith('- ') or   # Маркированный список
+                'ПРИМЕР:' in line or       # Примеры
+                'Шаг ' in line):          # Инструкции
+            
                 if current_chunk:
                     chunks.append('\n'.join(current_chunk))
                     current_chunk = []
+                
             current_chunk.append(line)
         
+            # Сохраняем блоки кода вместе с контекстом
+            if code_block:
+                continue
+            
         if current_chunk:
             chunks.append('\n'.join(current_chunk))
-        
+    
         return [chunk.strip() for chunk in chunks if chunk.strip()]
 
     def extract_metadata(self, text: str) -> dict:
@@ -34,7 +50,11 @@ class TextRetriever:
             'content': text,
             'title': text.split('\n')[0] if text else '',
             'terms': self._extract_terms(text),
-            'concepts': self._extract_concepts(text)
+            'concepts': self._extract_concepts(text),
+            'is_code': bool(re.search(r'```.*```', text, re.DOTALL)),
+            'is_instruction': any(marker in text.lower() for marker in 
+                ['шаг', 'инструкция', 'настройка', 'установка']),
+            'code_samples': re.findall(r'```.*?```', text, re.DOTALL)
         }
         return metadata
 
@@ -89,13 +109,13 @@ class TextRetriever:
         # Векторное представление запроса
         query_vector = self.model.encode([query])
         
-        # Поиск ближайших векторов
+        # Поиск ближайших векторов через FAISS
         distances, indices = self.index.search(query_vector.astype('float32'), k)
         
         # Формируем результаты с учетом семантической близости
         results = []
         for i, idx in enumerate(indices[0]):
-            # Нормализуем score для лучшей интерпретации
+            # Нормализуем score для оценки близости
             semantic_score = 1 / (1 + distances[0][i])
             results.append((self.texts[idx], semantic_score))
         

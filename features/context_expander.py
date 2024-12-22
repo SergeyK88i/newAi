@@ -11,6 +11,18 @@ class ContextExpander:
         for chunk, score in initial_chunks:
             expanded_context.append(chunk)
             
+            # Ищем связанные инструкции
+            if any(marker in query.lower() for marker in ['как', 'настройка', 'установка']):
+                related_instructions = self.retriever.retrieve(
+                    f"инструкция {query}", k=2)
+                expanded_context.extend([c for c, _ in related_instructions])
+                
+            # Ищем примеры кода
+            if 'пример' in query.lower():
+                code_samples = self.retriever.retrieve(
+                    f"пример {query}", k=2)
+                expanded_context.extend([c for c, _ in code_samples])
+                
             # Извлекаем ключевые термины из чанка
             terms = self.extract_terms(chunk)
             
