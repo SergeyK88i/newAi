@@ -87,7 +87,8 @@ class TextRetriever:
 
         chunks = self.semantic_chunk(text)
         self.texts = chunks
-
+        print('созданные чанки',len(self.texts))
+        
         # Создаём расширенные метаданные
         self.chunks_metadata = [self.extract_metadata(chunk) for chunk in chunks]
 
@@ -100,8 +101,8 @@ class TextRetriever:
         dimension = text_embeddings.shape[1]
         self.index = faiss.IndexFlatL2(dimension)
         self.index.add(text_embeddings.astype('float32'))
-
-    def retrieve(self, query: str, k: int = 5) -> List[Tuple[str, float]]:
+        print('self.index',self.index.ntotal)
+    def retrieve(self, query: str, k: int = 15) -> List[Tuple[str, float]]:
         """Семантический поиск по смыслу"""
         if not self.index or not self.texts:
             return []

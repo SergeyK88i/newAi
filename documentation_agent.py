@@ -9,6 +9,7 @@ class DocumentationAgent:
         self.question_matcher = QuestionMatcher(model=self.retriever.model)
         self.context_expander = ContextExpander(self.retriever)
         self.giga_chat = GigaChatAPI()
+        self.request_counter = 0  # добавляем счетчик
         response = self.giga_chat.get_token(auth_token)
         if not response or response.status_code != 200:
             raise Exception("Не удалось получить токен для GigaChat")
@@ -88,16 +89,17 @@ class DocumentationAgent:
                 if best_match['similarity'] > 0.9:
                     return f"Найден похожий вопрос:\nВопрос: {best_match['question']}\nОтвет: {best_match['answer']}"
 
-            # Мысль - анализ запроса
+            # Мысль - анализ типа запроса
             query_type = self._get_query_type(next_prompt)
+            # Выбираем специальный промпт для типа запроса
             system_message = self._get_system_prompt(query_type)
             
-            # Действие - поиск информации
-            relevant_chunks = self.retriever.retrieve(next_prompt, k=7)
+            # Действие - поиск информации через TextRetriever
+            relevant_chunks = self.retriever.retrieve(next_prompt, k=15)
             if not relevant_chunks:
                 return "В предоставленной документации нет информации по этому вопросу."
 
-            # Расширяем контекст
+            # Расширяем контекст через ContextExpander
             expanded_context = self.context_expander.expand_context(relevant_chunks, next_prompt)
             context = "\n".join(expanded_context)
             
@@ -105,28 +107,31 @@ class DocumentationAgent:
             user_message = f"Контекст:\n{context}\n\nВажно: Используйте ТОЛЬКО информацию из предоставленного контекста выше.Вопрос: {next_prompt}\n\nОтвет:"
             
             # Получаем ответ от модели
+            self.request_counter += 1  # увеличиваем счетчик
             chat_response = self.giga_chat.get_chat_completion(system_message, user_message)
+            print(f"Запрос #{self.request_counter} к GigaChat выполнен")
 
             if chat_response and chat_response.status_code == 200:
                 response = chat_response.json()['choices'][0]['message']['content']
 
+                # Если получен валидный ответ - сразу возвращаем его
+                if "Answer" in response or not "PAUSE" in response:
+                    validated_response = self.validate_response(response, context)
+                    self.question_matcher.add_question(query, validated_response)
+                    print(f"Всего запросов к GigaChat: {self.request_counter}")
+                    return validated_response
+
+                # Продолжаем только если нужно дополнительное наблюдение
                 if "PAUSE" in response:
-                    # Наблюдение - проверка результатов
-                    if not relevant_chunks:
+                    if not relevant_chunks: # проверка тех же чанков
                         next_prompt = "Observation: Информация не найдена"
                         continue
-                        
                     expanded_context = self.context_expander.expand_context(relevant_chunks, next_prompt)
                     next_prompt = f"Observation: Найдена информация: {expanded_context}"
                     continue
 
-                # Финальный ответ
-                if "Answer" in response or i == max_iterations - 1:
-                    validated_response = self.validate_response(response, context)
-                    self.question_matcher.add_question(query, validated_response)
-                    return validated_response
-
         return "Не удалось получить ответ. Попробуйте переформулировать вопрос."
+        print(f"Всего запросов к GigaChat: {self.request_counter}")
     def clear_conversation(self):
         """Очистка истории диалога"""
         self.giga_chat.clear_history()
