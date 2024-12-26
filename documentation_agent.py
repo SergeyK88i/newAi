@@ -1,6 +1,6 @@
 from text_retriever import TextRetriever
 from GigaClass import GigaChatAPI
-from features import QuestionMatcher, ContextExpander
+from features import QuestionMatcher, ContextExpander, KnowledgeBase
 
 class DocumentationAgent:    
     def __init__(self, file_path: str, auth_token: str):
@@ -15,6 +15,14 @@ class DocumentationAgent:
             raise Exception("Не удалось получить токен для GigaChat")
 
     def clarify_query(self, query: str) -> str:
+        # Проверяем специальные термины из базы знаний
+        for term in self.knowledge_base.terms_mapping:
+            if term in query.lower():
+                context = self.knowledge_base.context_mapping.get(term)
+                if context:
+                    # Добавляем контекстную информацию из базы знаний
+                    query = context['full_name']
+
         # Находим релевантные чанки для термина
         relevant_chunks = self.retriever.retrieve(query, k=5)
         
@@ -47,7 +55,13 @@ class DocumentationAgent:
         
         # Собираем доступные уточнения
         available_options = [clarifications[cat] for cat in set(found_categories)]
-        
+        # Если есть специальные термины, добавляем связанные термины из базы знаний
+        for term in self.knowledge_base.terms_mapping:
+            if term in query.lower():
+                context = self.knowledge_base.context_mapping.get(term)
+                if context:
+                    available_options.append(f"узнать о связанных терминах: {', '.join(context['related_terms'])}")
+
         return f"Уточните, что вы хотите узнать о {query}:\n" + \
                "\n".join([f"- {option}" for option in available_options])
 

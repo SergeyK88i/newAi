@@ -2,13 +2,14 @@ from sentence_transformers import SentenceTransformer
 import faiss
 from typing import List, Tuple
 import re
-
+from features.knowledge_base import KnowledgeBase
 class TextRetriever:
     def __init__(self, model_name: str = 'distiluse-base-multilingual-cased-v1'):
         self.model = SentenceTransformer(model_name)
         self.index = None
         self.texts = []
         self.chunks_metadata = []
+        self.knowledge_base = KnowledgeBase()
 
     def semantic_chunk(self, text: str) -> List[str]:
         """Семантическая разбивка текста с учетом связанных частей"""
@@ -81,7 +82,7 @@ class TextRetriever:
         """Создание векторных представлений текста"""
         with open(file_path, 'r', encoding='utf-8') as file:
             text = file.read()
-
+            print(f"Исходный текст: {len(text)} символов")
         if not text:
             raise ValueError("Файл пустой или не содержит текста")
 
@@ -102,13 +103,32 @@ class TextRetriever:
         self.index = faiss.IndexFlatL2(dimension)
         self.index.add(text_embeddings.astype('float32'))
         print('self.index',self.index.ntotal)
+
+    def expand_query(self, query: str) -> str:
+        expanded_terms = []
+        for term, mappings in self.knowledge_base.terms_mapping.items():
+            if term in query.lower():
+                expanded_terms.extend(mappings)
+                
+                if term in self.knowledge_base.context_mapping:
+                    context = self.knowledge_base.context_mapping[term]
+                    expanded_terms.extend([
+                        context['process'],
+                        context['area'],
+                        context['full_name']
+                    ])
+                    expanded_terms.extend(context['related_terms'])
+        
+        return ' '.join([query] + expanded_terms)
+
     def retrieve(self, query: str, k: int = 15) -> List[Tuple[str, float]]:
         """Семантический поиск по смыслу"""
         if not self.index or not self.texts:
             return []
 
+        expanded_query = self.expand_query(query)
         # Векторное представление запроса
-        query_vector = self.model.encode([query])
+        query_vector = self.model.encode([expanded_query])
         
         # Поиск ближайших векторов через FAISS
         distances, indices = self.index.search(query_vector.astype('float32'), k)
