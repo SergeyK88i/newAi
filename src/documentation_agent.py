@@ -10,6 +10,7 @@ class DocumentationAgent:
         self.context_expander = ContextExpander(self.retriever)
         self.giga_chat = GigaChatAPI()
         self.request_counter = 0  # добавляем счетчик
+        self.knowledge_base = KnowledgeBase()
         response = self.giga_chat.get_token(auth_token)
         if not response or response.status_code != 200:
             raise Exception("Не удалось получить токен для GigaChat")
