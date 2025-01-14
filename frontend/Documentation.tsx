@@ -13,60 +13,76 @@ export default function Documentation() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [showSidebar, setShowSidebar] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim()) return
+
+    const userMessage = input
+    setInput('')
+    setMessages(prev => [...prev, { type: 'user', content: userMessage }])
+
+    const response = await fetch('http://localhost:8000/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: userMessage })
+    })
+    
+    const data = await response.json()
+    setMessages(prev => [...prev, { 
+      type: 'bot', 
+      content: data.answer,
+      chunks: data.relevant_chunks 
+    }])
+  }
   
   return (
     <div className={styles.container}>
-      {/* Верхняя панель */}
-      <header className={styles.header}>
-        <button onClick={() => setShowSidebar(!showSidebar)}>
-          ☰ История
+      <div className={styles.header}>
+        <button 
+          className={styles.menuButton}
+          onClick={() => setShowSidebar(!showSidebar)}
+        >
+          ☰
         </button>
-        <h1>Документация</h1>
-      </header>
+        <h1 className={styles.title}>Документация</h1>
+      </div>
 
-      {/* Основной контент */}
-      <div className={styles.content}>
-        {/* Выдвижная панель */}
-        {showSidebar && (
-          <aside className={styles.sidebar}>
-            <h2>История запросов</h2>
-            {messages.filter(m => m.type === 'user').map((m, i) => (
-              <div key={i} className={styles.historyItem}>
-                {m.content}
-              </div>
+      <div className={styles.mainContent}>
+        <aside className={`${styles.sidebar} ${showSidebar ? styles.sidebarOpen : ''}`}>
+          <h2>История запросов</h2>
+          <div className={styles.historyList}>
+            {messages
+              .filter(m => m.type === 'user')
+              .map((m, i) => (
+                <div key={i} className={styles.historyItem}>
+                  {m.content}
+                </div>
             ))}
-          </aside>
-        )}
+          </div>
+        </aside>
 
-        {/* Чат */}
-        <main className={styles.chat}>
+        <main className={styles.chatArea}>
           <div className={styles.messages}>
             {messages.map((message, i) => (
-              <div key={i} className={styles.messageWrapper}>
-                <div className={`${styles.message} ${styles[message.type]}`}>
-                  <div className={styles.messageContent}>
-                    {message.content}
-                  </div>
-                  {message.chunks && (
-                    <div className={styles.chunks}>
-                      <button className={styles.showChunks}>
-                        Показать релевантные фрагменты
-                      </button>
-                    </div>
-                  )}
-                </div>
+              <div key={i} className={`${styles.message} ${styles[message.type]}`}>
+                {message.content}
               </div>
             ))}
           </div>
 
-          <div className={styles.inputWrapper}>
+          <form onSubmit={handleSubmit} className={styles.inputForm}>
             <input
-              className={styles.input}
+              type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Задайте вопрос..."
+              className={styles.input}
             />
-          </div>
+            <button type="submit" className={styles.sendButton}>
+              →
+            </button>
+          </form>
         </main>
       </div>
     </div>
