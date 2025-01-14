@@ -1,7 +1,7 @@
 from documentation_agent import DocumentationAgent
 
 def main():
-    file_path = '../file.txt'
+    file_path = 'file.txt'
     auth_token = 'MmMzZDA5OGMtODIyNS00MGJlLWJhOGItMzRhOTgyY2M0YjBhOjk3NGQ0ZTA3LWQ3MDUtNDhhNC1iYjFlLTQ0N2Y2ZmJkMWM4Mg=='
 
     # Создаем экземпляр агента
