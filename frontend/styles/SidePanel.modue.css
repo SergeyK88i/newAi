@@ -1,0 +1,47 @@
+.sidePanel {
+    position: fixed;
+    right: 0;
+    top: 0;
+    height: 100%;
+    width: 50%;
+    background-color: #fff;
+    box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    overflow: hidden;
+  }
+  
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid #e5e5e5;
+  }
+  
+  .title {
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  
+  .closeButton {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+  }
+  
+  .content {
+    height: calc(100vh - 60px);
+    padding: 1rem;
+    overflow-y: auto;
+  }
+  
+  .codeBlock {
+    white-space: pre-wrap;
+    font-family: monospace;
+    background-color: #f3f4f6;
+    padding: 1rem;
+    border-radius: 0.25rem;
+  }
+  
+  

@@ -1,0 +1,78 @@
+.card {
+    max-width: 48rem;
+    margin: 0 auto;
+    background-color: #fff;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  }
+  
+  .chatContainer {
+    display: flex;
+    flex-direction: column;
+    height: 600px;
+  }
+  
+  .messageArea {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+  }
+  
+  .message {
+    margin-bottom: 1rem;
+    display: flex;
+  }
+  
+  .userMessage {
+    justify-content: flex-end;
+  }
+  
+  .assistantMessage {
+    justify-content: flex-start;
+  }
+  
+  .messageContent {
+    max-width: 80%;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+  }
+  
+  .userMessageContent {
+    background-color: #3b82f6;
+    color: #fff;
+  }
+  
+  .assistantMessageContent {
+    background-color: #f3f4f6;
+    color: #000;
+  }
+  
+  .inputArea {
+    display: flex;
+    padding: 1rem;
+    border-top: 1px solid #e5e5e5;
+  }
+  
+  .input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.25rem;
+    margin-right: 0.5rem;
+  }
+  
+  .sendButton {
+    padding: 0.5rem 1rem;
+    background-color: #3b82f6;
+    color: #fff;
+    border: none;
+    border-radius: 0.25rem;
+    cursor: pointer;
+  }
+  
+  .sendButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  
