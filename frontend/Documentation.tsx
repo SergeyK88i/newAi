@@ -1,98 +1,114 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import styles from './Documentation.module.css'
 
 interface Message {
-  question: string
-  answer: string
-}
-
-interface RelevantChunk {
-  text: string
-  score: number
+  type: 'user' | 'bot'
+  content: string
+  chunks?: Array<{ text: string; score: number }>
 }
 
 export default function Documentation() {
-  const [question, setQuestion] = useState('')
-  const [history, setHistory] = useState<Message[]>([])
-  const [relevantChunks, setRelevantChunks] = useState<RelevantChunk[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
 
-  const askQuestion = async () => {
-    if (!question) return
-    
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    if (!input.trim()) return
+
+    const userMessage = input
+    setInput('')
+    setMessages(prev => [...prev, { type: 'user', content: userMessage }])
+
     const response = await fetch('http://localhost:8000/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question })
+      body: JSON.stringify({ question: userMessage })
     })
     
     const data = await response.json()
     
-    setHistory(prev => [...prev, { 
-      question, 
-      answer: data.answer 
+    setMessages(prev => [...prev, { 
+      type: 'bot', 
+      content: data.answer,
+      chunks: data.relevant_chunks 
     }])
-    setRelevantChunks(data.relevant_chunks)
-    setQuestion('')
   }
 
   const clearHistory = async () => {
-    await fetch('http://localhost:8000/api/clear', {
-      method: 'POST'
-    })
-    setHistory([])
-    setRelevantChunks([])
+    await fetch('http://localhost:8000/api/clear', { method: 'POST' })
+    setMessages([])
   }
 
   return (
     <div className={styles.container}>
-      <h1 className={styles.title}>Система консультации по документации</h1>
-      
-      {history.length > 0 && (
-        <div className={styles.historySection}>
-          <h2 className={styles.historyTitle}>История диалога:</h2>
-          {history.map((msg, i) => (
-            <div key={i} className={styles.messageCard}>
-              <p><strong>Вопрос:</strong> {msg.question}</p>
-              <p><strong>Ответ:</strong> {msg.answer}</p>
-            </div>
-          ))}
-        </div>
-      )}
-      
-      {relevantChunks.length > 0 && (
-        <div className={styles.chunksSection}>
-          <h2 className={styles.historyTitle}>Найденные релевантные фрагменты:</h2>
-          {relevantChunks.map((chunk, i) => (
-            <div key={i} className={styles.chunkCard}>
-              <p>Релевантность: {chunk.score.toFixed(4)}</p>
-              <p>Текст: {chunk.text}</p>
-            </div>
-          ))}
-        </div>
-      )}
-      
-      <div className={styles.inputSection}>
-        <input
-          type="text"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Введите ваш вопрос"
-          className={styles.input}
-        />
-        <button 
-          onClick={askQuestion}
-          className={`${styles.button} ${styles.askButton}`}
-        >
-          Спросить
-        </button>
+      <div className={styles.chatContainer}>
         <button 
           onClick={clearHistory}
-          className={`${styles.button} ${styles.clearButton}`}
+          className={styles.clearButton}
         >
-          Очистить
+          Очистить историю
         </button>
+        
+        <div className={styles.messagesContainer}>
+          {messages.map((message, i) => (
+            <div 
+              key={i} 
+              className={`${styles.message} ${
+                message.type === 'user' ? styles.userMessage : ''
+              }`}
+            >
+              <div className={`${styles.messageContent} ${
+                message.type === 'user' ? styles.userMessageContent : styles.botMessageContent
+              }`}>
+                {message.content}
+                {message.chunks && (
+                  <div className={styles.relevantChunks}>
+                    {message.chunks.map((chunk, j) => (
+                      <div key={j}>
+                        <small>Релевантность: {chunk.score.toFixed(4)}</small>
+                        <p>{chunk.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <form 
+          className={styles.inputContainer} 
+          onSubmit={handleSubmit}
+        >
+          <div className={styles.inputWrapper}>
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Задайте вопрос..."
+              className={styles.input}
+            />
+            <button 
+              type="submit"
+              className={styles.sendButton}
+              disabled={!input.trim()}
+            >
+              →
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
