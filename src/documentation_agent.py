@@ -1,6 +1,7 @@
 from text_retriever import TextRetriever
 from GigaClass import GigaChatAPI
 from features import QuestionMatcher, ContextExpander, KnowledgeBase
+import re
 
 class DocumentationAgent:    
     def __init__(self, file_path: str, auth_token: str):
@@ -120,7 +121,24 @@ class DocumentationAgent:
         #Строгое сравнение?
         # if not any(chunk in response for chunk in context.split('\n')):
         #     return "Информация отсутствует в документации"
+        
+        # Проверяем телефоны
+        phone_pattern = r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
+        phones_in_response = set(re.findall(phone_pattern, response))
+        phones_in_context = set(re.findall(phone_pattern, context))
+        
+        # Проверяем email
+        email_pattern = r'[\w\.-]+@[\w\.-]+'
+        emails_in_response = set(re.findall(email_pattern, response))
+        emails_in_context = set(re.findall(email_pattern, context))
+        
+        # Если найдены контакты, которых нет в контексте
+        if phones_in_response - phones_in_context:
+            response = re.sub(phone_pattern, '[ТЕЛЕФОН УДАЛЕН]', response)
             
+        if emails_in_response - emails_in_context:
+            response = re.sub(email_pattern, '[EMAIL УДАЛЕН]', response)
+
         if not response.startswith("Согласно документации:"):
             response = "Согласно документации: " + response
             
