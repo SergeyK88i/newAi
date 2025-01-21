@@ -3,6 +3,8 @@ import faiss
 from typing import List, Tuple
 import re
 from features.knowledge_base import KnowledgeBase
+import json
+
 class TextRetriever:
     def __init__(self, model_name: str = 'distiluse-base-multilingual-cased-v1'):
         self.model = SentenceTransformer(model_name)
@@ -121,7 +123,7 @@ class TextRetriever:
         
         return ' '.join([query] + expanded_terms)
 
-    def retrieve(self, query: str, k: int = 15) -> List[Tuple[str, float]]:
+    def retrieve(self, query: str, k: int = 5) -> List[Tuple[str, float]]:
         """Семантический поиск по смыслу"""
         if not self.index or not self.texts:
             return []
@@ -141,3 +143,13 @@ class TextRetriever:
             results.append((self.texts[idx], semantic_score))
         
         return sorted(results, key=lambda x: x[1], reverse=True)
+
+    def print_all_chunks(self):
+        print(f"Всего чанков: {len(self.texts)}\n")
+        for i, chunk in enumerate(self.texts):
+            print(f"=== Чанк {i+1} ===")
+            print(f"Содержание:\n{chunk}")
+            print("\nМетаданные:")
+            print(json.dumps(self.chunks_metadata[i], indent=2, ensure_ascii=False))
+            print("\n" + "="*50 + "\n")
+

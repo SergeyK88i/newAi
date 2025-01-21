@@ -7,6 +7,7 @@ class DocumentationAgent:
     def __init__(self, file_path: str, auth_token: str):
         self.retriever = TextRetriever()
         self.retriever.create_embeddings(file_path)
+        self.retriever.print_all_chunks()
         self.question_matcher = QuestionMatcher(model=self.retriever.model)
         self.context_expander = ContextExpander(self.retriever)
         self.giga_chat = GigaChatAPI()
@@ -163,10 +164,11 @@ class DocumentationAgent:
             query_type = self._get_query_type(next_prompt)
             # Выбираем специальный промпт для типа запроса
             system_message = self._get_system_prompt(query_type)
+            print(f"\nСистемный промпт:\n{system_message}")
             thought = f"Тип запроса: {query_type}. Ищем информацию в документации."
             
             # Действие - поиск информации через TextRetriever
-            relevant_chunks = self.retriever.retrieve(next_prompt, k=15)
+            relevant_chunks = self.retriever.retrieve(next_prompt, k=5)
             if not relevant_chunks:
                 return "В предоставленной документации нет информации по этому вопросу."
 
@@ -184,6 +186,7 @@ class DocumentationAgent:
             # Получаем ответ от модели
             self.request_counter += 1  # увеличиваем счетчик
             chat_response = self.giga_chat.get_chat_completion(system_message, user_message)
+            print(f"\nФинальный промпт для GigaChat:\n{user_message}")
             print(f"Запрос #{self.request_counter} к GigaChat выполнен")
             
             # Добавляем проверку успешности первого запроса
@@ -266,4 +269,6 @@ class DocumentationAgent:
     def clear_conversation(self):
         """Очистка истории диалога"""
         self.giga_chat.clear_history()
-        return "История диалога очищена"
+        self.question_matcher.questions_db = []  # Очищаем базу вопросов
+        self.question_matcher.question_vectors = None
+        return "История диалога и база вопросов очищены"
