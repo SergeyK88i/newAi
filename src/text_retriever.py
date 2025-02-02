@@ -4,7 +4,39 @@ from typing import List, Tuple
 import re
 from features.knowledge_base import KnowledgeBase
 import json
-
+import numpy as np
+class MetadataAdapter:
+    def __init__(self, base_model):
+        self.model = base_model
+        self.terms_weight = 0.2
+        self.concepts_weight = 0.3
+        self.code_weight = 0.15
+        
+    def adapt_embedding(self, base_embedding, metadata):
+        adapted = base_embedding.copy()
+        
+        # Добавляем эмбеддинги терминов
+        if metadata['terms']:
+            terms_text = ' '.join(metadata['terms'])
+            terms_embedding = self.model.encode([terms_text])[0]
+            adapted += self.terms_weight * terms_embedding
+            
+        # Добавляем эмбеддинги концепций    
+        if metadata['concepts']:
+            concepts_text = ' '.join(metadata['concepts'])
+            concepts_embedding = self.model.encode([concepts_text])[0]
+            adapted += self.concepts_weight * concepts_embedding
+            
+        # Добавляем эмбеддинги кода
+        if metadata['code_samples']:
+            code_text = ' '.join(metadata['code_samples'])
+            code_embedding = self.model.encode([code_text])[0]
+            adapted += self.code_weight * code_embedding
+            
+        # Нормализуем результат
+        adapted = adapted / np.linalg.norm(adapted)
+        
+        return adapted
 class TextRetriever:
     def __init__(self, model_name: str = 'distiluse-base-multilingual-cased-v1'):
         self.model = SentenceTransformer(model_name)
@@ -12,6 +44,7 @@ class TextRetriever:
         self.texts = []
         self.chunks_metadata = []
         self.knowledge_base = KnowledgeBase()
+        self.adapter = MetadataAdapter(self.model)
 
     def semantic_chunk(self, text: str) -> List[str]:
         """Семантическая разбивка текста с учетом связанных частей"""
@@ -27,8 +60,8 @@ class TextRetriever:
 
             # Новый чанк начинается при:
             if (line.startswith('# ') or  # Заголовок
-                line.startswith('1. ') or  # Нумерованный список
-                line.startswith('- ') or   # Маркированный список
+                line.startswith('## ') or  # Нумерованный список
+                line.startswith('### ') or   # Маркированный список
                 'ПРИМЕР:' in line or       # Примеры
                 'Шаг ' in line):          # Инструкции
             
@@ -49,9 +82,26 @@ class TextRetriever:
 
     def extract_metadata(self, text: str) -> dict:
         """Извлечение расширенных метаданных из текста"""
+        # Находим основной заголовок документа (# Заголовок)
+        main_title_match = re.search(r'^#\s+(.+)$', text, re.MULTILINE)
+        parent_title = ""
+        
+        if main_title_match:
+            # Если это основной заголовок, он становится parent_title
+            parent_title = main_title_match.group(1).strip()
+        else:
+            # Если это не основной заголовок, ищем последний основной заголовок
+            for chunk in reversed(self.texts):
+                main_title_match = re.search(r'^#\s+(.+)$', chunk, re.MULTILINE)
+                if main_title_match:
+                    parent_title = main_title_match.group(1).strip()
+                    break
+        
         metadata = {
             'content': text,
             'title': text.split('\n')[0] if text else '',
+            'parent_title': parent_title,
+            'section_path': self._get_section_path(text),
             'terms': self._extract_terms(text),
             'concepts': self._extract_concepts(text),
             'is_code': bool(re.search(r'```.*```', text, re.DOTALL)),
@@ -60,6 +110,31 @@ class TextRetriever:
             'code_samples': re.findall(r'```.*?```', text, re.DOTALL)
         }
         return metadata
+
+    def _get_section_path(self, text: str) -> list:
+        """Получение полного пути секции в иерархии документа"""
+        headers = []
+        hierarchy = []
+        
+        # Ищем основной заголовок в предыдущих чанках
+        for chunk in reversed(self.texts):
+            main_title_match = re.search(r'^#\s+(.+)', chunk, re.MULTILINE)
+            if main_title_match:
+                hierarchy.append(main_title_match.group(1).strip())
+                break
+                
+        # Обрабатываем текущий чанк
+        for line in text.split('\n'):
+            if line.startswith('#'):
+                level = len(re.match(r'^#+', line).group())
+                title = line.lstrip('#').strip()
+                
+                # Обновляем иерархию согласно уровню
+                hierarchy = hierarchy[:level-1]
+                hierarchy.append(title)
+                
+        return hierarchy
+
 
     def _extract_terms(self, text: str) -> List[str]:
         """Извлечение терминов и их вариаций"""
@@ -95,9 +170,17 @@ class TextRetriever:
         # Создаём расширенные метаданные
         self.chunks_metadata = [self.extract_metadata(chunk) for chunk in chunks]
 
-        # Создаем эмбеддинги для текстов и концепций
-        text_embeddings = self.model.encode([chunk['content'] for chunk in self.chunks_metadata])
-        
+        # Создаем адаптированные эмбеддинги с учетом метаданных
+        text_embeddings = []
+        for chunk, metadata in zip(chunks, self.chunks_metadata):
+            # Базовый эмбеддинг текста
+            base_embedding = self.model.encode([chunk])[0]
+            # Обогащаем метаданными через адаптер
+            adapted_embedding = self.adapter.adapt_embedding(base_embedding, metadata)
+            text_embeddings.append(adapted_embedding)
+
+        text_embeddings = np.vstack(text_embeddings)
+
         if text_embeddings.shape[0] == 0:
             raise ValueError("Не удалось создать эмбеддинги")
 

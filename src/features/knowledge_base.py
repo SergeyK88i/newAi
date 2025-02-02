@@ -1,23 +1,31 @@
 class KnowledgeBase:
     def __init__(self):
         self.terms_mapping = {
-            "к4": ["критерий 4", "шаг к4", "devops к4", "дфси к4"],
-            "к5": ["критерий 5", "шаг к5", "devops к5", "дфси к5"],
-            "дфси": ["процесс дфси", "dfsi", "digital factory system integration"],
-            "девопс": ["devops", "девопс практики", "непрерывная поставка"],
+            "hdfs": ["hadoop distributed file system", "хадуп файловая система", "распределенная фс"],
+            "namenode": ["нейм нода", "name node", "мастер нода"],
+            "datanode": ["дата нода", "data node", "рабочая нода"],
+            "mapreduce": ["мапредьюс", "map reduce", "мап редьюс", "распределенные вычисления"],
+            "hadoop": ["хадуп", "apache hadoop", "hadoop framework"],
+            "wordcount": ["подсчет слов", "word count", "пример mapreduce"]
         }
 
         self.context_mapping = {
-            "к4": {
-                "process": "дфси",
-                "area": "девопс",
-                "full_name": "Критерий 4 - Непрерывная поставка",
-                "related_terms": ["ci/cd", "пайплайн", "автоматизация"],
+            "hdfs": {
+                "process": "storage",
+                "area": "distributed_fs",
+                "full_name": "Hadoop Distributed File System - распределенная файловая система",
+                "related_terms": ["блоки данных", "репликация", "namenode", "datanode"],
             },
-            "к5": {
-                "process": "дфси",
-                "area": "девопс",
-                "full_name": "Критерий 5 - Управление конфигурациями",
-                "related_terms": ["git", "версионирование", "конфигурации"],
+            "mapreduce": {
+                "process": "processing",
+                "area": "distributed_computing",
+                "full_name": "MapReduce - модель распределенных вычислений",
+                "related_terms": ["mapper", "reducer", "wordcount", "distributed processing"],
             },
+            "hadoop": {
+                "process": "big_data",
+                "area": "framework",
+                "full_name": "Apache Hadoop - фреймворк для распределенной обработки",
+                "related_terms": ["hdfs", "mapreduce", "yarn", "distributed computing"],
+            }
         }

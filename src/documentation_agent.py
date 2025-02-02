@@ -1,6 +1,7 @@
 from text_retriever import TextRetriever
 from GigaClass import GigaChatAPI
 from features import QuestionMatcher, ContextExpander, KnowledgeBase
+from typing import List
 import re
 
 class DocumentationAgent:    
@@ -16,6 +17,50 @@ class DocumentationAgent:
         response = self.giga_chat.get_token(auth_token)
         if not response or response.status_code != 200:
             raise Exception("Не удалось получить токен для GigaChat")
+
+    def ask_with_chunks(self, query: str, chunks: List[str]):
+        query_type = self._get_query_type(query)
+        system_message = self._get_system_prompt(query_type)
+        print(f"Всего чанков для обработки: {len(chunks)}")
+        # Объединяем близкие по смыслу чанки
+        merged_chunks = []
+        current_chunk = []
+        
+        for chunk in chunks:
+            if len('\n'.join(current_chunk)) + len(chunk) < 2000:  # Лимит токенов
+                current_chunk.append(chunk)
+            else:
+                merged_chunks.append('\n'.join(current_chunk))
+                current_chunk = [chunk]
+                
+        if current_chunk:
+            merged_chunks.append('\n'.join(current_chunk))
+
+        # Передаем объединенные чанки
+        for i, merged_chunk in enumerate(merged_chunks[:-1]):
+            message = f"Часть {i+1}: {merged_chunk}"
+            response = self.giga_chat.get_chat_completion(system_message, message)
+            # if response is None or response.status_code != 200:
+            #     return "Ошибка при передаче информации"
+            if response and response.status_code == 200:
+                response_text = response.json()['choices'][0]['message']['content']
+                print(f"Ответ на чанк {i+1}: {response_text}")
+                if "OK" not in response_text:
+                    print(f"Предупреждение: GigaChat не ответил OK на чанк {i+1}")
+
+        print(f"Отправка финального чанка с вопросом")
+        # Отправляем последний чанк с вопросом
+        final_message = f"""
+        Последняя часть информации: {merged_chunks[-1]}
+        
+        Вопрос: {query}
+        """
+        final_response = self.giga_chat.get_chat_completion(system_message, final_message)
+        
+        if final_response is None or final_response.status_code != 200:
+            return "Ошибка при получении финального ответа"
+            
+        return final_response.json()['choices'][0]['message']['content']
 
     def clarify_query(self, query: str) -> str:
         # Проверяем специальные термины из базы знаний
@@ -83,32 +128,23 @@ class DocumentationAgent:
 
     def _get_system_prompt(self, query_type: str) -> str:
         """Получение специализированного промпта в зависимости от типа запроса"""
-        prompts = {
-            'definition': """Вы - точный ассистент по документации.
-                       Используйте ТОЛЬКО предоставленный контекст.
-                       Не добавляйте информацию из других источников.
-                       Предоставьте определение термина, используя ТОЛЬКО текст после символов '—' или ':' из контекста.""",
+        base_prompt = """Ты - точный ассистент по документации.
+        Твоя задача - отвечать ИСКЛЮЧИТЕЛЬНО на основе предоставленного контекста.
+        Ты получишь информацию частями. После каждой части отвечай "OK" если готов получить следующую.
+        Когда получишь часть с вопросом - дай полный ответ.
+        Если информации нет в контексте - ответь "В предоставленной документации нет информации по этому вопросу".
+        Категорически запрещено использовать внешние знания или придумывать ответы."""
         
-            'setup': """Вы - технический специалист.
-                    Используйте ТОЛЬКО предоставленный контекст.
-                    Составьте инструкцию, опираясь ТОЛЬКО на информацию из контекста.
-                    Не добавляйте шаги или параметры, которых нет в контексте.""",
-
-            'example': """Вы - технический специалист.
-                        Используйте ТОЛЬКО предоставленный контекст.
-                        Приводите ТОЛЬКО те примеры, которые есть в контексте.
-                        Не добавляйте свои примеры.""",
-
-            'troubleshooting': """Вы - технический специалист.
-                        Используйте ТОЛЬКО предоставленный контекст.
-                        Описывайте ТОЛЬКО те проблемы и решения, которые указаны в контексте.""",
-        
-            'full': """Вы - точный ассистент по документации.
-                    Используйте ТОЛЬКО предоставленный контекст.
-                    Не добавляйте внешнюю информацию.
-                    Если информации в контексте недостаточно, укажите это."""
+        type_prompts = {
+            'definition': "Предоставь определение термина, используя ТОЛЬКО текст после символов '—' или ':' из контекста.",
+            'setup': "Составь пошаговую инструкцию на основе информации из контекста.",
+            'example': "Приведи только те примеры, которые есть в контексте.",
+            'troubleshooting': "Опиши только те проблемы и решения, которые указаны в контексте.",
+            'full': "Если информации в контексте недостаточно, укажи это."
         }
-        return prompts.get(query_type, prompts['full'])
+        
+        return f"{base_prompt}\n{type_prompts.get(query_type, type_prompts['full'])}"
+
 
     def validate_response(self, response: str, context: str) -> str:
         # validate_response() проверяет качество ответа
@@ -151,7 +187,6 @@ class DocumentationAgent:
             return self.clear_conversation()
 
         next_prompt = query
-        
         for i in range(max_iterations):
             # Сначала ищем похожие вопросы
             similar_questions = self.question_matcher.find_similar(next_prompt)
@@ -160,112 +195,79 @@ class DocumentationAgent:
                 if best_match['similarity'] > 0.9:
                     return f"Найден похожий вопрос:\nВопрос: {best_match['question']}\nОтвет: {best_match['answer']}"
 
-            # Мысль - анализ типа запроса
+            # Анализ типа запроса
             query_type = self._get_query_type(next_prompt)
-            # Выбираем специальный промпт для типа запроса
             system_message = self._get_system_prompt(query_type)
             print(f"\nСистемный промпт:\n{system_message}")
             thought = f"Тип запроса: {query_type}. Ищем информацию в документации."
-            
-            # Действие - поиск информации через TextRetriever
+
+            # Поиск информации
             relevant_chunks = self.retriever.retrieve(next_prompt, k=5)
             if not relevant_chunks:
                 return "В предоставленной документации нет информации по этому вопросу."
 
-            # Расширяем контекст через ContextExpander
+            # Расширяем контекст
             expanded_context = self.context_expander.expand_context(relevant_chunks, next_prompt)
-            context = "\n".join(expanded_context)
             
-            # Формируем сообщение для модели
-            user_message = f"""Thought: {thought}
-            Action: Найдены релевантные фрагменты документации
-            Context: {context}
-
-            Important: Используйте ТОЛЬКО информацию из предоставленного контекста.
-            Question: {next_prompt}"""            
-            # Получаем ответ от модели
-            self.request_counter += 1  # увеличиваем счетчик
-            chat_response = self.giga_chat.get_chat_completion(system_message, user_message)
-            print(f"\nФинальный промпт для GigaChat:\n{user_message}")
+            # Порционная передача контекста и получение ответа
+            self.request_counter += 1
+            first_response = self.ask_with_chunks(next_prompt, expanded_context)
             print(f"Запрос #{self.request_counter} к GigaChat выполнен")
+            print(f"Получен ответ на первый запрос: {first_response}")
+
+            # Проверяем релевантность ответа
+            system_message_validate = """Вы - эксперт по оценке качества ответов.
+            Проанализируйте ответ и определите:
+            1. Отвечает ли он на поставленный вопрос
+            2. Содержит ли всю необходимую информацию
+            3. Нужны ли уточнения
             
-            # Добавляем проверку успешности первого запроса
-            if not chat_response or chat_response.status_code != 200:
-                return "Не удалось получить ответ от сервиса"
+            Если ответ неполный или нерелевантный - укажите "PAUSE" и опишите что нужно уточнить.
+            Если ответ полный - укажите "VALID"."""
 
-            if chat_response and chat_response.status_code == 200:
-                first_response = chat_response.json()['choices'][0]['message']['content']  # Сохраняем ответ
-                print(f"Получен ответ на первый запрос: {first_response}")
+            user_message_validate = f"""Вопрос: {query}
+            Ответ: {first_response}
+            Оцените релевантность ответа."""
 
-                # Проверяем релевантность ответа
-                system_message_validate = """Вы - эксперт по оценке качества ответов.
-                Проанализируйте ответ и определите:
-                1. Отвечает ли он на поставленный вопрос
-                2. Содержит ли всю необходимую информацию
-                3. Нужны ли уточнения
+            self.request_counter += 1
+            validation_response = self.giga_chat.get_chat_completion(system_message_validate, user_message_validate)
+            print(f"Запрос #{self.request_counter} к GigaChat выполнен")
+
+            if validation_response and validation_response.status_code == 200:
+                validation_result = validation_response.json()['choices'][0]['message']['content']
                 
-                Если ответ неполный или нерелевантный - укажите "PAUSE" и опишите что нужно уточнить.
-                Если ответ полный - укажите "VALID"."""
+                if "VALID" in validation_result:
+                    validated_response = self.validate_response(first_response, "\n".join(expanded_context))
+                    self.question_matcher.add_question(query, validated_response)
+                    print(f"Всего запросов к GigaChat: {self.request_counter}")
+                    return validated_response
 
-                user_message_validate = f"""Вопрос: {query}
-                Ответ: {first_response}
-                Оцените релевантность ответа."""
+                if "PAUSE" in validation_result:
+                    try:
+                        pause_reason = validation_result.split("PAUSE:")[1].strip()
+                    except IndexError:
+                        pause_reason = "Не удалось определить причину паузы"
 
-                self.request_counter += 1
-                validation_response = self.giga_chat.get_chat_completion(system_message_validate, user_message_validate)
-                print(f"Запрос #{self.request_counter} к GigaChat выполнен")
-            
-                if validation_response and validation_response.status_code == 200:
-                    validation_result = validation_response.json()['choices'][0]['message']['content']
-                    
-                    # Если ответ валидный - сразу возвращаем
-                    if "VALID" in validation_result:
-                        validated_response = self.validate_response(first_response, context)
-                        self.question_matcher.add_question(query, validated_response)
-                        print(f"Всего запросов к GigaChat: {self.request_counter}")
-                        return validated_response
+                    clarification_options = self.clarify_query(query)
+                    if clarification_options:
+                        giga_question = f"\nУточняющий вопрос от ассистента: {pause_reason}"
+                        return clarification_options + giga_question
 
-                    # Продолжаем только если нужна дополнительная информация   
-                    if "PAUSE" in validation_result:
-                        # Извлекаем причину паузы: для понимания что именно нужно уточнить
-                        try:
-                            pause_reason = validation_result.split("PAUSE:")[1].strip()
-                        except IndexError:
-                            pause_reason = "Не удалось определить причину паузы"
-                            
-                        # 1. Сначала проверяем автоматические уточнения
-                        clarification_options = self.clarify_query(query)
+                    additional_chunks = self.retriever.retrieve(pause_reason, k=5)
+                    if additional_chunks:
+                        additional_context = self.context_expander.expand_context(additional_chunks, pause_reason)
+                        next_prompt = f"""Observation: Требуется уточнение: {pause_reason}
+                        Предыдущий ответ: {first_response}
+                        Дополнительный контекст:{' '.join(additional_context)}
+                        Вопрос: {query}
+                        Пожалуйста, предоставьте более полный ответ."""
+                        continue
 
-                        if clarification_options:
-                            # Добавляем вопрос от GigaChat к вариантам уточнений
-                            giga_question = f"\nУточняющий вопрос от ассистента: {pause_reason}"
-                            return clarification_options + giga_question
-
-                        
-                        # 2. Пробуем найти дополнительную информацию
-                        # Если уточнения не найдены, используем существующую логику
-                        # Новое действие - поиск дополнительной информации
-                        # Ищем дополнительные чанки по причине паузы
-                        additional_chunks = self.retriever.retrieve(pause_reason, k=5)
-                        
-                        if additional_chunks:
-                            
-                            additional_context = self.context_expander.expand_context(additional_chunks, pause_reason)
-                            # Формируем новый промпт:
-                            next_prompt = f"""Observation: Требуется уточнение: {pause_reason}
-                            Предыдущий ответ: {first_response}
-                            Дополнительный контекст:{' '.join(additional_context)}
-                            Вопрос: {query}
-                            Пожалуйста, предоставьте более полный ответ."""
-                            continue
-
-                        # 3. Если автоматические уточнения не найдены, 
-                        # возвращаем только вопрос от GigaChat
-                        giga_question = f"Для предоставления точного ответа мне нужно уточнить: {pause_reason}"
-                        return giga_question
+                    giga_question = f"Для предоставления точного ответа мне нужно уточнить: {pause_reason}"
+                    return giga_question
 
         return "Не удалось получить ответ. Попробуйте переформулировать вопрос."
-        print(f"Всего запросов к GigaChat: {self.request_counter}")
+
     def clear_conversation(self):
         """Очистка истории диалога"""
         self.giga_chat.clear_history()
