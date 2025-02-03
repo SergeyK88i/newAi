@@ -27,7 +27,7 @@ class DocumentationAgent:
         current_chunk = []
         
         for chunk in chunks:
-            if len('\n'.join(current_chunk)) + len(chunk) < 2000:  # Лимит токенов
+            if len('\n'.join(current_chunk)) + len(chunk) < 5000:  # Лимит токенов
                 current_chunk.append(chunk)
             else:
                 merged_chunks.append('\n'.join(current_chunk))
@@ -35,6 +35,9 @@ class DocumentationAgent:
                 
         if current_chunk:
             merged_chunks.append('\n'.join(current_chunk))
+        print(f"\nСгруппированные чанки ({len(merged_chunks)} групп):")
+        for i, merged_chunk in enumerate(merged_chunks):
+            print(f"\n=== Группа чанков {i+1} ===\n{merged_chunk}\n{'='*50}")
 
         # Передаем объединенные чанки
         for i, merged_chunk in enumerate(merged_chunks[:-1]):
